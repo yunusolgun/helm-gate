@@ -19,3 +19,4 @@ keygen.py
 *.pfx
 ~/.helmgate/
 .claude/
+helm-chart/

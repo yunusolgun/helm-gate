@@ -1,9 +1,11 @@
 import sys
 from pathlib import Path
+from typing import Optional
 
 import typer
 from rich.console import Console
 
+import shutil
 from .scanner import scan
 from .report import print_report
 from .license import is_pro, activate as activate_license
@@ -20,6 +22,13 @@ console = Console()
 @app.command(name="scan")
 def scan_cmd(
     chart: Path = typer.Argument(..., help="Path to the Helm chart directory."),
+    values_file: Optional[Path] = typer.Option(
+        None,
+        "--values",
+        "-f",
+        help="Values file for helm template rendering and targeted values scanning. "
+             "If omitted, all values*.yaml files in the chart root are scanned.",
+    ),
     fail_on: str = typer.Option(
         "CRITICAL",
         "--fail-on",
@@ -33,6 +42,10 @@ def scan_cmd(
         console.print(f"[red]Error:[/red] '{chart}' is not a directory.")
         raise typer.Exit(1)
 
+    if values_file and not values_file.is_file():
+        console.print(f"[red]Error:[/red] values file '{values_file}' not found.")
+        raise typer.Exit(1)
+
     pro = is_pro()
 
     if output == "json" and not pro:
@@ -43,18 +56,25 @@ def scan_cmd(
         )
         raise typer.Exit(1)
 
-    from .rules import ALL_RULES, FREE_RULES
+    from .rules import ALL_RULES, FREE_RULES, VALUES_RULES, FREE_VALUES_RULES
     rules = ALL_RULES if pro else FREE_RULES
+    v_rules = VALUES_RULES if pro else FREE_VALUES_RULES
 
     if not pro:
-        hidden = len(ALL_RULES) - len(FREE_RULES)
+        hidden_manifest = len(ALL_RULES) - len(FREE_RULES)
+        hidden_values = len(VALUES_RULES) - len(FREE_VALUES_RULES)
         console.print(
             f"[dim]Free tier: scanning with CRITICAL and HIGH rules only "
-            f"({hidden} MEDIUM/LOW rules hidden). "
+            f"({hidden_manifest + hidden_values} MEDIUM/LOW rules hidden). "
             f"Upgrade at helmgate.io/pricing[/dim]\n"
         )
 
-    findings = scan(chart, rules=rules)
+    if not shutil.which("helm"):
+        console.print(
+            "[yellow]Warning: helm not found — manifest rules skipped, values scan only.[/yellow]\n"
+        )
+
+    findings = scan(chart, rules=rules, values_file=values_file, values_rules=v_rules)
 
     if output == "json":
         import json

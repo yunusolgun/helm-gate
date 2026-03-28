@@ -1,6 +1,15 @@
 # helmgate
 
-Helm chart linter and policy enforcement CLI. Scans Kubernetes Helm charts for security vulnerabilities and best-practice violations.
+**Helm chart security scanner and policy enforcement CLI.**
+
+Scans Kubernetes Helm charts for security vulnerabilities and best-practice violations — across rendered manifests *and* raw `values.yaml` files.
+
+## How it works
+
+helmgate runs two scanning passes on every chart:
+
+1. **Manifest scan** — renders the chart via `helm template` and applies security/best-practice rules against every Kubernetes workload, RBAC, Ingress, Service, and ConfigMap resource.
+2. **Values scan** — parses every `values*.yaml` file directly to catch hardcoded secrets, dangerous security context settings, and misconfigurations before they reach the cluster.
 
 ## Installation
 
@@ -11,10 +20,13 @@ pip install helmgate
 ## Usage
 
 ```bash
-# Scan a chart (table output, default)
+# Scan a chart with default values (table output)
 helmgate scan ./my-chart
 
-# Pro: export as JSON
+# Scan with a specific values file
+helmgate scan ./my-chart -f ./my-chart/values-prod.yaml
+
+# Export findings as JSON (Pro)
 helmgate scan ./my-chart --output json
 ```
 
@@ -41,8 +53,8 @@ helmgate scan ./my-chart --fail-on HIGH
 # Scan without failing the build (report only)
 helmgate scan ./my-chart --fail-on NONE
 
-# JSON output without failing the build (Pro)
-helmgate scan ./my-chart --output json --fail-on NONE
+# Scan a specific values file and fail on MEDIUM+
+helmgate scan ./my-chart -f values-prod.yaml --fail-on MEDIUM
 ```
 
 **GitHub Actions example:**
@@ -56,8 +68,8 @@ helmgate scan ./my-chart --output json --fail-on NONE
 
 | Feature | Free | Pro |
 |---|---|---|
-| CRITICAL & HIGH rules (13 rules) | ✓ | ✓ |
-| MEDIUM & LOW rules (29 rules) | — | ✓ |
+| CRITICAL & HIGH rules (29 rules) | ✓ | ✓ |
+| MEDIUM & LOW rules (41 rules) | — | ✓ |
 | JSON output | — | ✓ |
 | Price | Free | $9 one-time (lifetime) |
 
@@ -77,7 +89,7 @@ export HELMGATE_LICENSE_KEY=HGATE-<your-key>
 
 ## Rules
 
-### Security (SEC) — 20 rules
+### Security (SEC) — 26 rules
 
 | ID | Severity | Description |
 |---|---|---|
@@ -87,7 +99,7 @@ export HELMGATE_LICENSE_KEY=HGATE-<your-key>
 | SEC004 | MEDIUM | Root filesystem not read-only |
 | SEC005 | HIGH | Host network namespace shared |
 | SEC006 | HIGH | Host PID namespace shared |
-| SEC007 | HIGH | Linux capabilities not dropped |
+| SEC007 | HIGH | Linux capabilities not dropped (ALL) |
 | SEC008 | MEDIUM | Secret passed as plain-text env var |
 | SEC009 | HIGH | Host IPC namespace shared |
 | SEC010 | MEDIUM | Seccomp profile not set |
@@ -101,8 +113,14 @@ export HELMGATE_LICENSE_KEY=HGATE-<your-key>
 | SEC018 | MEDIUM | shareProcessNamespace enabled |
 | SEC019 | MEDIUM | subPath used in volumeMount |
 | SEC020 | LOW | No pod-level securityContext |
+| SEC021 | HIGH | RBAC role grants wildcard verbs (*) |
+| SEC022 | HIGH | RBAC role grants wildcard resources (*) |
+| SEC023 | HIGH | RBAC role allows reading Secrets |
+| SEC024 | CRITICAL | RBAC role grants escalation verbs (bind/escalate/impersonate) |
+| SEC025 | CRITICAL | Binding to cluster-admin role |
+| SEC026 | CRITICAL | ConfigMap contains plaintext secret |
 
-### Best Practices (BP) — 22 rules
+### Best Practices (BP) — 26 rules
 
 | ID | Severity | Description |
 |---|---|---|
@@ -128,3 +146,32 @@ export HELMGATE_LICENSE_KEY=HGATE-<your-key>
 | BP020 | LOW | minReadySeconds not set (Deployment) |
 | BP021 | LOW | priorityClassName not set |
 | BP022 | MEDIUM | CronJob concurrencyPolicy is Allow |
+| BP023 | MEDIUM | Ingress has no TLS configured |
+| BP024 | MEDIUM | Ingress rule uses wildcard/empty host |
+| BP025 | LOW | Service type is NodePort or LoadBalancer |
+| BP026 | MEDIUM | Service sets externalIPs |
+
+### Values (VAL) — 18 rules
+
+Checks raw `values.yaml` / `values*.yaml` files directly — catches misconfigurations before `helm template` is even run.
+
+| ID | Severity | Description |
+|---|---|---|
+| VAL001 | CRITICAL | Hardcoded secret in values (password, token, key, etc.) |
+| VAL002 | CRITICAL | securityContext.privileged: true |
+| VAL003 | HIGH | securityContext.runAsUser: 0 (root) |
+| VAL004 | HIGH | securityContext.allowPrivilegeEscalation: true |
+| VAL005 | HIGH | hostNetwork: true |
+| VAL006 | HIGH | hostPID: true |
+| VAL007 | HIGH | image.tag is `latest` |
+| VAL008 | HIGH | resources is empty (no CPU/memory limits) |
+| VAL009 | HIGH | Dangerous capability added (NET_ADMIN, SYS_ADMIN, etc.) |
+| VAL010 | MEDIUM | networkPolicy.enabled: false |
+| VAL011 | CRITICAL | rbac.clusterAdmin: true |
+| VAL012 | MEDIUM | ingress.tls is empty while ingress is enabled |
+| VAL013 | LOW | service.type is NodePort |
+| VAL014 | LOW | pdb.enabled: false (no PodDisruptionBudget) |
+| VAL015 | LOW | image.pullPolicy: Always |
+| VAL016 | LOW | LOG_LEVEL is debug/trace in configMap |
+| VAL017 | MEDIUM | persistence.accessModes includes ReadWriteMany |
+| VAL018 | MEDIUM | podSecurityContext is empty |

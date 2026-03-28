@@ -378,6 +378,72 @@ class CronJobConcurrencyRule(Rule):
         return findings
 
 
+class IngressWithoutTLSRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") != "Ingress":
+            return []
+        tls = manifest.get("spec", {}).get("tls") or []
+        if not tls:
+            return [Finding(
+                rule_id=self.id,
+                severity=self.severity,
+                message="Ingress has no TLS configured — traffic is served over plain HTTP.",
+                path=path,
+                line_hint="spec.tls",
+            )]
+        return []
+
+
+class IngressWildcardHostRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") != "Ingress":
+            return []
+        findings = []
+        for rule in manifest.get("spec", {}).get("rules", []):
+            host = rule.get("host", "")
+            if not host or "*" in host:
+                findings.append(Finding(
+                    rule_id=self.id,
+                    severity=self.severity,
+                    message=f"Ingress rule has a wildcard/empty host '{host}' — accepts traffic for any hostname.",
+                    path=path,
+                    line_hint="spec.rules[].host",
+                ))
+        return findings
+
+
+class ServiceNodePortRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") != "Service":
+            return []
+        stype = manifest.get("spec", {}).get("type", "ClusterIP")
+        if stype in ("NodePort", "LoadBalancer"):
+            return [Finding(
+                rule_id=self.id,
+                severity=self.severity,
+                message=f"Service type is '{stype}' — exposes the service externally on every node. Prefer ClusterIP + Ingress.",
+                path=path,
+                line_hint="spec.type",
+            )]
+        return []
+
+
+class ExternalIPRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") != "Service":
+            return []
+        external_ips = manifest.get("spec", {}).get("externalIPs", [])
+        if external_ips:
+            return [Finding(
+                rule_id=self.id,
+                severity=self.severity,
+                message=f"Service sets externalIPs {external_ips} — direct external access bypasses load balancer controls.",
+                path=path,
+                line_hint="spec.externalIPs",
+            )]
+        return []
+
+
 # ── rule registry ─────────────────────────────────────────────────────────────
 
 BEST_PRACTICE_RULES: list[Rule] = [
@@ -512,5 +578,29 @@ BEST_PRACTICE_RULES: list[Rule] = [
         name="CronJob concurrency policy",
         severity=Severity.MEDIUM,
         description="CronJobs should set concurrencyPolicy to Forbid or Replace.",
+    ),
+    IngressWithoutTLSRule(
+        id="BP023",
+        name="Ingress without TLS",
+        severity=Severity.MEDIUM,
+        description="Ingress resources should configure TLS to encrypt traffic.",
+    ),
+    IngressWildcardHostRule(
+        id="BP024",
+        name="Ingress wildcard host",
+        severity=Severity.MEDIUM,
+        description="Ingress rules should specify an explicit hostname, not a wildcard.",
+    ),
+    ServiceNodePortRule(
+        id="BP025",
+        name="Service type NodePort or LoadBalancer",
+        severity=Severity.LOW,
+        description="Services should use ClusterIP and expose externally via Ingress.",
+    ),
+    ExternalIPRule(
+        id="BP026",
+        name="Service externalIPs set",
+        severity=Severity.MEDIUM,
+        description="Services should not set externalIPs — use a LoadBalancer or Ingress instead.",
     ),
 ]

@@ -366,6 +366,118 @@ class PodSecurityContextRule(Rule):
         return findings
 
 
+_RBAC_KINDS = {"ClusterRole", "Role"}
+_BINDING_KINDS = {"ClusterRoleBinding", "RoleBinding"}
+_READ_VERBS = {"get", "list", "watch", "*"}
+_ESCALATION_VERBS = {"bind", "escalate", "impersonate"}
+
+
+class RBACWildcardVerbRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") not in _RBAC_KINDS:
+            return []
+        findings = []
+        for i, rule in enumerate(manifest.get("rules", [])):
+            if "*" in rule.get("verbs", []):
+                findings.append(Finding(
+                    rule_id=self.id,
+                    severity=self.severity,
+                    message=f"RBAC rule #{i} grants wildcard verbs (*) — any action on the matched resources is allowed.",
+                    path=path,
+                    line_hint=f"rules[{i}].verbs",
+                ))
+        return findings
+
+
+class RBACWildcardResourceRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") not in _RBAC_KINDS:
+            return []
+        findings = []
+        for i, rule in enumerate(manifest.get("rules", [])):
+            if "*" in rule.get("resources", []):
+                findings.append(Finding(
+                    rule_id=self.id,
+                    severity=self.severity,
+                    message=f"RBAC rule #{i} grants access to all resource types (*) — overly broad permissions.",
+                    path=path,
+                    line_hint=f"rules[{i}].resources",
+                ))
+        return findings
+
+
+class RBACSecretReadRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") not in _RBAC_KINDS:
+            return []
+        findings = []
+        for i, rule in enumerate(manifest.get("rules", [])):
+            resources = set(rule.get("resources", []))
+            verbs = set(rule.get("verbs", []))
+            if ("secrets" in resources or "*" in resources) and (verbs & _READ_VERBS):
+                findings.append(Finding(
+                    rule_id=self.id,
+                    severity=self.severity,
+                    message=f"RBAC rule #{i} allows reading Secrets — exposes all secret values to this role.",
+                    path=path,
+                    line_hint=f"rules[{i}].resources[secrets]",
+                ))
+        return findings
+
+
+class RBACEscalationVerbsRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") not in _RBAC_KINDS:
+            return []
+        findings = []
+        for i, rule in enumerate(manifest.get("rules", [])):
+            found = set(rule.get("verbs", [])) & _ESCALATION_VERBS
+            for v in sorted(found):
+                findings.append(Finding(
+                    rule_id=self.id,
+                    severity=self.severity,
+                    message=f"RBAC rule #{i} grants '{v}' verb — enables privilege escalation via RBAC.",
+                    path=path,
+                    line_hint=f"rules[{i}].verbs[{v}]",
+                ))
+        return findings
+
+
+class ClusterAdminBindingRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") not in _BINDING_KINDS:
+            return []
+        if manifest.get("roleRef", {}).get("name") == "cluster-admin":
+            subjects = manifest.get("subjects", [])
+            names = ", ".join(s.get("name", "?") for s in subjects)
+            return [Finding(
+                rule_id=self.id,
+                severity=self.severity,
+                message=f"Binding grants cluster-admin to: {names} — full unrestricted cluster access.",
+                path=path,
+                line_hint="roleRef.name",
+            )]
+        return []
+
+
+class ConfigMapSensitiveDataRule(Rule):
+    def check(self, manifest: dict[str, Any], path: str) -> list[Finding]:
+        if manifest.get("kind") != "ConfigMap":
+            return []
+        data = manifest.get("data") or {}
+        findings = []
+        for key, value in data.items():
+            if any(kw in key.upper() for kw in _SECRET_KEYWORDS) and isinstance(value, str) and value.strip():
+                findings.append(Finding(
+                    rule_id=self.id,
+                    severity=self.severity,
+                    message=f"ConfigMap key '{key}' appears to contain a secret — use a Kubernetes Secret.",
+                    path=path,
+                    line_hint=f"data.{key}",
+                ))
+        return findings
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _pod_spec(manifest: dict[str, Any]) -> dict | None:
@@ -505,5 +617,41 @@ SECURITY_RULES: list[Rule] = [
         name="No pod-level securityContext",
         severity=Severity.LOW,
         description="Pods should define a pod-level securityContext.",
+    ),
+    RBACWildcardVerbRule(
+        id="SEC021",
+        name="RBAC wildcard verbs",
+        severity=Severity.HIGH,
+        description="RBAC roles should not grant wildcard (*) verbs.",
+    ),
+    RBACWildcardResourceRule(
+        id="SEC022",
+        name="RBAC wildcard resources",
+        severity=Severity.HIGH,
+        description="RBAC roles should not grant access to all resource types (*).",
+    ),
+    RBACSecretReadRule(
+        id="SEC023",
+        name="RBAC allows secret read",
+        severity=Severity.HIGH,
+        description="RBAC roles should not allow reading Secrets unless strictly necessary.",
+    ),
+    RBACEscalationVerbsRule(
+        id="SEC024",
+        name="RBAC escalation verbs",
+        severity=Severity.CRITICAL,
+        description="RBAC roles should not grant bind, escalate, or impersonate verbs.",
+    ),
+    ClusterAdminBindingRule(
+        id="SEC025",
+        name="Cluster-admin binding",
+        severity=Severity.CRITICAL,
+        description="Subjects should not be bound to the cluster-admin role.",
+    ),
+    ConfigMapSensitiveDataRule(
+        id="SEC026",
+        name="ConfigMap sensitive data",
+        severity=Severity.CRITICAL,
+        description="Sensitive values should not be stored in ConfigMaps — use Secrets.",
     ),
 ]
