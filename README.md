@@ -1,5 +1,7 @@
 # helmgate
 
+[![PyPI version](https://badge.fury.io/py/helmgate.svg)](https://pypi.org/project/helmgate/)
+
 **Helm chart security scanner and policy enforcement CLI.**
 
 Scans Kubernetes Helm charts for security vulnerabilities and best-practice violations — across rendered manifests *and* raw `values.yaml` files.
