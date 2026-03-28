@@ -4,15 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "helmgate"
-version = "0.1.0"
+version = "0.1.1"
 description = "Helm chart linter and policy enforcement CLI"
+readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    {name = "Yunus Olgun", email = "yunus.olgun@outlook.com"}
+]
+keywords = ["helm", "kubernetes", "linter", "security", "policy"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
 dependencies = [
     "typer>=0.12",
     "pyyaml>=6.0",
     "rich>=13.0",
     "cryptography>=42.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yunusolgun/helm-gate"
+Repository = "https://github.com/yunusolgun/helm-gate"
+"Bug Tracker" = "https://github.com/yunusolgun/helm-gate/issues"
 
 [project.scripts]
 helmgate = "helmgate.cli:app"
