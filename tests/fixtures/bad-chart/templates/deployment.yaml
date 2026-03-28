@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bad-app
+  template:
+    metadata:
+      labels:
+        app: bad-app
+    spec:
+      hostNetwork: true
+      hostPID: true
+      hostIPC: true
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: host-vol
+          hostPath:
+            path: /etc
+      containers:
+        - name: app
+          image: myapp:latest
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+                - NET_ADMIN
+          ports:
+            - containerPort: 8080
+              hostPort: 8080
+          env:
+            - name: DB_PASSWORD
+              value: "supersecret123"
+            - name: API_TOKEN
+              value: "abc123token"
