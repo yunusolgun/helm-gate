@@ -18,3 +18,4 @@ keygen.py
 *.p12
 *.pfx
 ~/.helmgate/
+.claude/
